@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -28,10 +29,61 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// handle the file upload
+	const maxMemory = 10 * 1024 * 1024 // 10Mb
+	r.ParseMultipartForm(maxMemory)
 
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+	// "thumbnail" should match the HTML form input name
+	file, header, err := r.FormFile("thumbnail")
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
+		return
+	}
+	defer file.Close()
 
-	// TODO: implement the upload here
+	// Get content type
+	mediaType := header.Header.Get("Content-Type")
+	if mediaType == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing Content-Type for thumbnail", err)
+		return
+	}
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	// read the bytes
+	bytes, err := io.ReadAll(file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error reading file", err)
+		return
+	}
+
+	// Get the video from the DB
+	video, err := cfg.db.GetVideo(videoID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Unable to find video", err)
+		return
+	}
+
+	// Make sure authenticated users is the owner
+	if video.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Not authorized for this video", err)
+		return
+	}
+
+	// Save the thumbnail to the global map
+	videoThumbnails[videoID] = thumbnail{
+		data:      bytes,
+		mediaType: mediaType,
+	}
+
+	// save new thumbnail url to the video metadata in the DB
+	thumbnailUrl := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoIDString)
+	video.ThumbnailURL = &thumbnailUrl
+
+	err = cfg.db.UpdateVideo(video)
+	if err != nil {
+		delete(videoThumbnails, videoID)
+		respondWithError(w, http.StatusInternalServerError, "Unable to update video", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, video)
 }
