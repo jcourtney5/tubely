@@ -5,6 +5,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -87,8 +88,21 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// reset temp file pointer to the start
 	tempFile.Seek(0, io.SeekStart)
 
+	// get aspect ratio and folder name
+	folder := "other"
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to get aspect ratio", err)
+		return
+	}
+	if aspectRatio == "16:9" {
+		folder = "landscape"
+	} else if aspectRatio == "9:16" {
+		folder = "portrait"
+	}
+
 	// get the video filename
-	s3Key := getAssetPath(mediaType)
+	s3Key := path.Join(folder, getAssetPath(mediaType))
 
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
