@@ -85,6 +85,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	_, err = tempFile.Seek(0, io.SeekStart)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not reset file pointer", err)
+		return
+	}
+
 	// get aspect ratio and folder name
 	folder := "other"
 	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
