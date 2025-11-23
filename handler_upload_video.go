@@ -85,9 +85,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// reset temp file pointer to the start
-	tempFile.Seek(0, io.SeekStart)
-
 	// get aspect ratio and folder name
 	folder := "other"
 	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
@@ -104,10 +101,26 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// get the video filename
 	s3Key := path.Join(folder, getAssetPath(mediaType))
 
+	// create file in temp dir optimized for faster start
+	processedTempFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error optimizing temp file", err)
+		return
+	}
+	defer os.Remove(processedTempFilePath)
+
+	// load the new temp file
+	processedTempFile, err := os.Open(processedTempFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error loading processed temp file", err)
+		return
+	}
+	defer processedTempFile.Close()
+
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(s3Key),
-		Body:        tempFile,
+		Body:        processedTempFile,
 		ContentType: aws.String(mediaType),
 	})
 	if err != nil {
